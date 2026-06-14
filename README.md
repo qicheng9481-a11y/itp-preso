@@ -37,6 +37,6 @@ Slide 7 — Q&A prep / backup data slide
 Keep raw chart sources here (not counted in time) so any member can pull up supporting numbers if asked.
 
 ## Suggested data sources to pull charts from
-Mongolia: UN Comtrade or WITS — export composition by HS code (minerals vs. total); pair with a simple time series of coal export volume 2019–2024
-Philippines: World Bank/FRED remittance-to-GDP series; WITS export composition (manufactured vs. primary)
-Malaysia: MATRADE or WITS — E&E share of exports over time, showing the shift from palm oil/rubber dominance
+Mongolia: UN Comtrade or WITS — export composition by HS code (minerals vs. total); pair with a simple time series of coal export volume 2019–2024  
+Philippines: World Bank/FRED remittance-to-GDP series; WITS export composition (manufactured vs. primary)  
+Malaysia: MATRADE or WITS — E&E share of exports over time, showing the shift from palm oil/rubber dominance  
