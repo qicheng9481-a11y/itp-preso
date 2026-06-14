@@ -10,11 +10,8 @@ Sources
   World Bank API   - macro/sectoral indicators (free, no key)
   WITS SDMX API    - bilateral + product-group trade flows (free, no key)
     wits.worldbank.org/API/V1/SDMX/V21/rest/
-  UN Comtrade API  - HS-4 commodity breakdowns (requires key)
-    set env var:  COMTRADE_KEY=<your_key>
 """
 
-import os
 import time
 import requests
 import pandas as pd
@@ -27,10 +24,6 @@ DATA_DIR.mkdir(exist_ok=True)
 WB_BASE   = "https://api.worldbank.org/v2"
 WITS_BASE = "https://wits.worldbank.org/API/V1/SDMX/V21/rest"
 WITS_FLOW = "WBG_WITS,DF_WITS_TradeStats_Trade,1.0"
-
-COMTRADE_KEY  = os.environ.get("COMTRADE_KEY", "2eac8da5a28a49bc853eb8930a81b704")
-COMTRADE_BASE = "https://comtradeapi.un.org/data/v1/get/C/A/HS"
-CT_CODES      = {"MNG": 496, "PHL": 608, "MYS": 458}  # ISO-3 -> Comtrade numeric
 
 # -- helpers ------------------------------------------------------------------
 
@@ -103,61 +96,6 @@ def wits_fetch(
         pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
         if rows else pd.DataFrame()
     )
-
-
-def comtrade_fetch(
-    reporter: str,
-    cmd_codes: list[str],
-    partner: int = 0,
-    start: int = 2000,
-    end: int = 2023,
-    flow: str = "X",
-) -> pd.DataFrame:
-    """
-    Fetch HS-level export data from UN Comtrade API v2.
-
-    reporter  - ISO-3 code mapped via CT_CODES (e.g. "MNG")
-    cmd_codes - list of HS-4 commodity codes (e.g. ["2701", "2603"])
-    partner   - Comtrade numeric partner code; 0 = World
-    Values returned are in USD (not thousands).
-    """
-    if not COMTRADE_KEY:
-        print("    [SKIP] COMTRADE_KEY not set")
-        return pd.DataFrame()
-    reporter_code = CT_CODES.get(reporter)
-    if reporter_code is None:
-        print(f"    [SKIP] Unknown reporter: {reporter}")
-        return pd.DataFrame()
-    params = {
-        "reporterCode": reporter_code,
-        "period": ",".join(str(y) for y in range(start, end + 1)),
-        "partnerCode": partner,
-        "cmdCode": ",".join(cmd_codes),
-        "flowCode": flow,
-        "includeDesc": "true",
-    }
-    headers = {"Ocp-Apim-Subscription-Key": COMTRADE_KEY}
-    try:
-        r = requests.get(COMTRADE_BASE, params=params, headers=headers, timeout=60)
-        r.raise_for_status()
-        data = r.json().get("data", [])
-    except Exception as e:
-        print(f"    [WARN] Comtrade {reporter} {cmd_codes}: {e}")
-        return pd.DataFrame()
-    if not data:
-        return pd.DataFrame()
-    records = [
-        {
-            "reporter": d.get("reporterDesc"),
-            "year":     d.get("period"),
-            "cmdCode":  d.get("cmdCode"),
-            "cmdDesc":  d.get("cmdDesc"),
-            "partner":  d.get("partnerDesc"),
-            "value_usd": d.get("primaryValue"),
-        }
-        for d in data
-    ]
-    return pd.DataFrame(records).sort_values(["cmdCode", "year"]).reset_index(drop=True)
 
 
 def save(df: pd.DataFrame, filename: str) -> None:
@@ -290,36 +228,7 @@ time.sleep(1)
 
 
 # =============================================================================
-# 3. UN Comtrade  - HS-4 commodity breakdowns  (requires COMTRADE_KEY)
-# =============================================================================
-
-if COMTRADE_KEY:
-    print("\n=== Comtrade - Mongolia HS-4 commodity breakdown ===")
-    # Distinguish coal (2701) from copper ore (2603), gold (7108), fluorspar (2529)
-    MNG_HS = ["2701", "2603", "7108", "2529"]
-    print(f"  HS codes {', '.join(MNG_HS)}  (2000-2023)")
-    save(
-        comtrade_fetch("MNG", MNG_HS, start=2000, end=2023),
-        "comtrade_mng_commodities.csv",
-    )
-    time.sleep(2)
-
-    print("\n=== Comtrade - Malaysia E&E sub-breakdown ===")
-    # Split HS 84-85 into: integrated circuits (8542), semiconductors (8541),
-    # computers (8471), computer parts (8473)
-    MYS_HS = ["8542", "8541", "8471", "8473"]
-    print(f"  HS codes {', '.join(MYS_HS)}  (2000-2023)")
-    save(
-        comtrade_fetch("MYS", MYS_HS, start=2000, end=2023),
-        "comtrade_mys_ee_breakdown.csv",
-    )
-    time.sleep(2)
-else:
-    print("\n[INFO] COMTRADE_KEY not set — skipping Comtrade HS-4 sections")
-
-
-# =============================================================================
-# 4. Derived summary tables
+# 3. Derived summary tables
 # =============================================================================
 
 print("\n=== Building derived tables ===")
@@ -391,7 +300,7 @@ if not mys_total.empty and not mys_machElec.empty:
 
 
 # =============================================================================
-# 5. File summary
+# 4. File summary
 # =============================================================================
 
 print("\n=== Downloaded files ===")
