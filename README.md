@@ -40,5 +40,3 @@ Keep raw chart sources here (not counted in time) so any member can pull up supp
 Mongolia: UN Comtrade or WITS — export composition by HS code (minerals vs. total); pair with a simple time series of coal export volume 2019–2024
 Philippines: World Bank/FRED remittance-to-GDP series; WITS export composition (manufactured vs. primary)
 Malaysia: MATRADE or WITS — E&E share of exports over time, showing the shift from palm oil/rubber dominance
-
-Division of labor maps cleanly onto your three members (~4 min each), satisfying both the "Volume" and "Q&A & Individual Accountability" criteria. Want help building one of the charts (e.g., Mongolia's coal export time series) as an artifact?
