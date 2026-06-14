@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""
+Download trade and economic data for ITP presentation:
+  Slide 3 - Mongolia:  mineral/coal export composition + China bilateral flows
+  Slide 4 - Philippines:  remittances (% GDP) + manufactured-goods export share
+  Slide 5 - Malaysia:  E&E vs. palm-oil/rubber export shift over time (2000-2024)
+
+Sources
+-------
+  World Bank API   - macro/sectoral indicators (free, no key)
+  WITS SDMX API    - bilateral + product-group trade flows (free, no key)
+    wits.worldbank.org/API/V1/SDMX/V21/rest/
+  UN Comtrade API  - HS-4 commodity breakdowns (requires key)
+    set env var:  COMTRADE_KEY=<your_key>
+"""
+
+import os
+import time
+import requests
+import pandas as pd
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+DATA_DIR  = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+
+WB_BASE   = "https://api.worldbank.org/v2"
+WITS_BASE = "https://wits.worldbank.org/API/V1/SDMX/V21/rest"
+WITS_FLOW = "WBG_WITS,DF_WITS_TradeStats_Trade,1.0"
+
+COMTRADE_KEY  = os.environ.get("COMTRADE_KEY", "2eac8da5a28a49bc853eb8930a81b704")
+COMTRADE_BASE = "https://comtradeapi.un.org/data/v1/get/C/A/HS"
+CT_CODES      = {"MNG": 496, "PHL": 608, "MYS": 458}  # ISO-3 -> Comtrade numeric
+
+# -- helpers ------------------------------------------------------------------
+
+def wb_fetch(countries: list[str], indicator: str, start=2000, end=2024) -> pd.DataFrame:
+    """Fetch one World Bank WDI indicator for a list of ISO-3 countries."""
+    url = f"{WB_BASE}/country/{';'.join(countries)}/indicator/{indicator}"
+    params = {"format": "json", "per_page": 1000, "date": f"{start}:{end}"}
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as e:
+        print(f"    [WARN] WB {indicator}: {e}")
+        return pd.DataFrame()
+    if len(payload) < 2 or not payload[1]:
+        return pd.DataFrame()
+    records = [
+        {"country": d["country"]["value"], "iso3": d["countryiso3code"],
+         "year": int(d["date"]), "value": d["value"]}
+        for d in payload[1] if d["value"] is not None
+    ]
+    return pd.DataFrame(records).sort_values(["country", "year"]).reset_index(drop=True)
+
+
+def wits_fetch(
+    reporter: str,
+    partner: str = "WLD",
+    product: str = "Total",
+    start: int = 2000,
+    end: int = 2023,
+    indicator: str = "XPRT-TRD-VL",
+) -> pd.DataFrame:
+    """
+    Fetch trade statistics from WITS SDMX API.
+
+    reporter / partner - ISO-3 country code  (e.g. "MNG", "MYS") or "WLD" for world
+    product  - WITS aggregate product code.  Available codes:
+               Total, 27-27_Fuels, 25-26_Minerals, OresMtls, Fuels,
+               84-85_MachElec, manuf, AgrRaw, Food, ...
+    Values returned are in thousands USD.
+    """
+    key = f"A.{reporter}.{partner}.{product}.{indicator}"
+    url = f"{WITS_BASE}/data/{WITS_FLOW}/{key}/"
+    params = {"startperiod": str(start), "endperiod": str(end)}
+    try:
+        r = requests.get(url, params=params, timeout=45)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"    [WARN] WITS {key}: {e}")
+        return pd.DataFrame()
+
+    root = ET.fromstring(r.content)
+    for el in root.iter():
+        if "}" in el.tag:
+            el.tag = el.tag.split("}", 1)[1]
+
+    rows = []
+    for series in root.iter("Series"):
+        keys = {kv.get("id"): kv.get("value") for kv in series.iter("Value")}
+        for obs in series.iter("Obs"):
+            period = obs.find("ObsDimension")
+            val    = obs.find("ObsValue")
+            if period is not None and val is not None:
+                row = dict(keys)
+                row["year"]      = int(period.get("value"))
+                row["value_kusd"] = float(val.get("value"))
+                rows.append(row)
+
+    return (
+        pd.DataFrame(rows).sort_values("year").reset_index(drop=True)
+        if rows else pd.DataFrame()
+    )
+
+
+def comtrade_fetch(
+    reporter: str,
+    cmd_codes: list[str],
+    partner: int = 0,
+    start: int = 2000,
+    end: int = 2023,
+    flow: str = "X",
+) -> pd.DataFrame:
+    """
+    Fetch HS-level export data from UN Comtrade API v2.
+
+    reporter  - ISO-3 code mapped via CT_CODES (e.g. "MNG")
+    cmd_codes - list of HS-4 commodity codes (e.g. ["2701", "2603"])
+    partner   - Comtrade numeric partner code; 0 = World
+    Values returned are in USD (not thousands).
+    """
+    if not COMTRADE_KEY:
+        print("    [SKIP] COMTRADE_KEY not set")
+        return pd.DataFrame()
+    reporter_code = CT_CODES.get(reporter)
+    if reporter_code is None:
+        print(f"    [SKIP] Unknown reporter: {reporter}")
+        return pd.DataFrame()
+    params = {
+        "reporterCode": reporter_code,
+        "period": ",".join(str(y) for y in range(start, end + 1)),
+        "partnerCode": partner,
+        "cmdCode": ",".join(cmd_codes),
+        "flowCode": flow,
+        "includeDesc": "true",
+    }
+    headers = {"Ocp-Apim-Subscription-Key": COMTRADE_KEY}
+    try:
+        r = requests.get(COMTRADE_BASE, params=params, headers=headers, timeout=60)
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    except Exception as e:
+        print(f"    [WARN] Comtrade {reporter} {cmd_codes}: {e}")
+        return pd.DataFrame()
+    if not data:
+        return pd.DataFrame()
+    records = [
+        {
+            "reporter": d.get("reporterDesc"),
+            "year":     d.get("period"),
+            "cmdCode":  d.get("cmdCode"),
+            "cmdDesc":  d.get("cmdDesc"),
+            "partner":  d.get("partnerDesc"),
+            "value_usd": d.get("primaryValue"),
+        }
+        for d in data
+    ]
+    return pd.DataFrame(records).sort_values(["cmdCode", "year"]).reset_index(drop=True)
+
+
+def save(df: pd.DataFrame, filename: str) -> None:
+    if df.empty:
+        print(f"    [SKIP] {filename} - no data returned")
+        return
+    path = DATA_DIR / filename
+    df.to_csv(path, index=False)
+    print(f"    -> {path}  ({len(df)} rows)")
+
+
+# =============================================================================
+# 1. World Bank macro / sectoral indicators  (2000-2024)
+# =============================================================================
+
+print("\n=== World Bank indicators ===")
+
+COUNTRIES = ["MNG", "PHL", "MYS"]
+
+WB_INDICATORS = {
+    # Merchandise export composition (% of total merchandise exports)
+    "TX.VAL.MRCH.CD.WT":   "merchandise_exports_usd",
+    "TX.VAL.MANF.ZS.UN":   "manufactures_pct_exports",
+    "TX.VAL.FUEL.ZS.UN":   "fuel_pct_exports",        # coal is Mongolia's main fuel
+    "TX.VAL.MMTL.ZS.UN":   "ores_metals_pct_exports", # copper, iron ore etc.
+    "TX.VAL.AGRI.ZS.UN":   "agri_raw_pct_exports",
+    # High-tech / ICT exports (Malaysia slide)
+    "TX.VAL.TECH.MF.ZS":   "hightech_pct_manufactured_exports",
+    "TX.VAL.ICTG.ZS.UN":   "ict_goods_pct_exports",   # ~E&E share
+    # Philippines - remittances
+    "BX.TRF.PWKR.DT.GD.ZS": "remittances_pct_gdp",
+    "BX.TRF.PWKR.CD.DT":    "remittances_usd",
+    # GDP (denominator / context)
+    "NY.GDP.MKTP.CD": "gdp_usd",
+    "NY.GDP.PCAP.CD": "gdp_per_capita_usd",
+    # Net migration (Philippines labor-export story)
+    "SM.POP.NETM": "net_migration",
+}
+
+frames = []
+for code, name in WB_INDICATORS.items():
+    print(f"  {code}  ({name})")
+    df = wb_fetch(COUNTRIES, code)
+    if not df.empty:
+        df["indicator"] = name
+        frames.append(df)
+    time.sleep(0.6)
+
+if frames:
+    long_df = pd.concat(frames, ignore_index=True)
+    save(long_df, "worldbank_long.csv")
+    pivot = long_df.pivot_table(
+        index=["country", "iso3", "year"], columns="indicator", values="value"
+    ).reset_index()
+    pivot.columns.name = None
+    save(pivot, "worldbank_pivot.csv")
+
+
+# =============================================================================
+# 2. WITS SDMX  - bilateral and product-group trade flows
+# =============================================================================
+
+YEARS_RECENT = (2019, 2023)
+YEARS_LONG   = (2000, 2023)
+
+# -- Mongolia ------------------------------------------------------------------
+print("\n=== WITS - Mongolia ===")
+
+print("  Total exports -> world (2000-2023)")
+save(wits_fetch("MNG", "WLD", "Total",        *YEARS_LONG), "wits_mng_total_world.csv")
+time.sleep(1)
+
+print("  Total exports -> China (bilateral dependency, 2000-2023)")
+save(wits_fetch("MNG", "CHN", "Total",        *YEARS_LONG), "wits_mng_total_china.csv")
+time.sleep(1)
+
+print("  Fuels (HS 27 = coal) -> world (2000-2023)")
+save(wits_fetch("MNG", "WLD", "27-27_Fuels",  *YEARS_LONG), "wits_mng_fuels.csv")
+time.sleep(1)
+
+print("  Minerals (HS 25-26 = ores, copper) -> world (2000-2023)")
+save(wits_fetch("MNG", "WLD", "25-26_Minerals", *YEARS_LONG), "wits_mng_minerals.csv")
+time.sleep(1)
+
+print("  Ores & Metals (WB classification) -> world (2000-2023)")
+save(wits_fetch("MNG", "WLD", "OresMtls",     *YEARS_LONG), "wits_mng_oresmtls.csv")
+time.sleep(1)
+
+# -- Philippines ---------------------------------------------------------------
+print("\n=== WITS - Philippines ===")
+
+print("  Total exports -> world (2000-2023)")
+save(wits_fetch("PHL", "WLD", "Total",           *YEARS_LONG), "wits_phl_total_world.csv")
+time.sleep(1)
+
+print("  Machinery & Electronics (HS 84-85) -> world (2019-2023)")
+save(wits_fetch("PHL", "WLD", "84-85_MachElec",  *YEARS_RECENT), "wits_phl_machElec.csv")
+time.sleep(1)
+
+print("  Manufactures -> world (2000-2023)")
+save(wits_fetch("PHL", "WLD", "manuf",            *YEARS_LONG), "wits_phl_manuf.csv")
+time.sleep(1)
+
+# -- Malaysia ------------------------------------------------------------------
+print("\n=== WITS - Malaysia ===")
+
+print("  Total exports -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "Total",           *YEARS_LONG), "wits_mys_total_world.csv")
+time.sleep(1)
+
+print("  Machinery & Electronics (HS 84-85, E&E) -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "84-85_MachElec",  *YEARS_LONG), "wits_mys_machElec.csv")
+time.sleep(1)
+
+print("  Fuels (HS 27 = petroleum) -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "27-27_Fuels",     *YEARS_LONG), "wits_mys_fuels.csv")
+time.sleep(1)
+
+print("  Manufactures -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "manuf",            *YEARS_LONG), "wits_mys_manuf.csv")
+time.sleep(1)
+
+print("  Agri Raw Materials (rubber, palm oil) -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "AgrRaw",           *YEARS_LONG), "wits_mys_agrraw.csv")
+time.sleep(1)
+
+print("  Food (palm oil derivatives) -> world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "Food",             *YEARS_LONG), "wits_mys_food.csv")
+time.sleep(1)
+
+
+# =============================================================================
+# 3. UN Comtrade  - HS-4 commodity breakdowns  (requires COMTRADE_KEY)
+# =============================================================================
+
+if COMTRADE_KEY:
+    print("\n=== Comtrade - Mongolia HS-4 commodity breakdown ===")
+    # Distinguish coal (2701) from copper ore (2603), gold (7108), fluorspar (2529)
+    MNG_HS = ["2701", "2603", "7108", "2529"]
+    print(f"  HS codes {', '.join(MNG_HS)}  (2000-2023)")
+    save(
+        comtrade_fetch("MNG", MNG_HS, start=2000, end=2023),
+        "comtrade_mng_commodities.csv",
+    )
+    time.sleep(2)
+
+    print("\n=== Comtrade - Malaysia E&E sub-breakdown ===")
+    # Split HS 84-85 into: integrated circuits (8542), semiconductors (8541),
+    # computers (8471), computer parts (8473)
+    MYS_HS = ["8542", "8541", "8471", "8473"]
+    print(f"  HS codes {', '.join(MYS_HS)}  (2000-2023)")
+    save(
+        comtrade_fetch("MYS", MYS_HS, start=2000, end=2023),
+        "comtrade_mys_ee_breakdown.csv",
+    )
+    time.sleep(2)
+else:
+    print("\n[INFO] COMTRADE_KEY not set — skipping Comtrade HS-4 sections")
+
+
+# =============================================================================
+# 4. Derived summary tables
+# =============================================================================
+
+print("\n=== Building derived tables ===")
+
+
+def load(name):
+    p = DATA_DIR / name
+    return pd.read_csv(p) if p.exists() else pd.DataFrame()
+
+
+# Mongolia: China share of total exports (China dependency)
+mng_world = load("wits_mng_total_world.csv")
+mng_china = load("wits_mng_total_china.csv")
+if not mng_world.empty and not mng_china.empty:
+    merged = mng_world[["year", "value_kusd"]].rename(columns={"value_kusd": "world_kusd"}).merge(
+        mng_china[["year", "value_kusd"]].rename(columns={"value_kusd": "china_kusd"}),
+        on="year", how="inner"
+    )
+    merged["china_share_pct"] = (merged["china_kusd"] / merged["world_kusd"] * 100).round(1)
+    save(merged, "derived_mng_china_dependency.csv")
+
+# Mongolia: export composition (fuels + minerals as % of total)
+mng_fuels = load("wits_mng_fuels.csv")
+mng_mins  = load("wits_mng_minerals.csv")
+if not mng_world.empty and not mng_fuels.empty:
+    comp = mng_world[["year", "value_kusd"]].rename(columns={"value_kusd": "total_kusd"})
+    comp = comp.merge(
+        mng_fuels[["year", "value_kusd"]].rename(columns={"value_kusd": "fuels_kusd"}),
+        on="year", how="left"
+    )
+    if not mng_mins.empty:
+        comp = comp.merge(
+            mng_mins[["year", "value_kusd"]].rename(columns={"value_kusd": "minerals_kusd"}),
+            on="year", how="left"
+        )
+    for col in [c for c in ("fuels_kusd", "minerals_kusd") if c in comp.columns]:
+        pct_col = col.replace("_kusd", "_pct")
+        comp[pct_col] = (comp[col] / comp["total_kusd"] * 100).round(1)
+    save(comp, "derived_mng_export_composition.csv")
+
+# Philippines: remittances vs. GDP
+if frames:
+    phl_data = long_df[(long_df["iso3"] == "PHL") & (long_df["indicator"].isin(
+        ["remittances_pct_gdp", "remittances_usd", "gdp_usd", "manufactures_pct_exports"]
+    ))]
+    phl_wide = phl_data.pivot_table(index="year", columns="indicator", values="value").reset_index()
+    phl_wide.columns.name = None
+    save(phl_wide, "derived_phl_remittances.csv")
+
+# Malaysia: E&E share of exports (MachElec / total)
+mys_total    = load("wits_mys_total_world.csv")
+mys_machElec = load("wits_mys_machElec.csv")
+mys_fuels    = load("wits_mys_fuels.csv")
+mys_agrraw   = load("wits_mys_agrraw.csv")
+if not mys_total.empty and not mys_machElec.empty:
+    mys_comp = mys_total[["year", "value_kusd"]].rename(columns={"value_kusd": "total_kusd"})
+    for label, df_src in [("machElec_kusd", mys_machElec),
+                           ("fuels_kusd",    mys_fuels),
+                           ("agrraw_kusd",   mys_agrraw)]:
+        if not df_src.empty:
+            mys_comp = mys_comp.merge(
+                df_src[["year", "value_kusd"]].rename(columns={"value_kusd": label}),
+                on="year", how="left"
+            )
+    for col in [c for c in mys_comp.columns if c.endswith("_kusd") and c != "total_kusd"]:
+        pct_col = col.replace("_kusd", "_pct")
+        mys_comp[pct_col] = (mys_comp[col] / mys_comp["total_kusd"] * 100).round(1)
+    save(mys_comp, "derived_mys_export_composition.csv")
+
+
+# =============================================================================
+# 5. File summary
+# =============================================================================
+
+print("\n=== Downloaded files ===")
+for f in sorted(DATA_DIR.iterdir()):
+    try:
+        rows = sum(1 for _ in open(f, encoding="utf-8")) - 1
+        print(f"  {f.name:<55}  {rows:>5} rows")
+    except Exception:
+        print(f"  {f.name}")
+
+print("\nDone. All files saved to data/")
