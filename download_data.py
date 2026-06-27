@@ -160,6 +160,7 @@ if frames:
 
 YEARS_RECENT = (2019, 2023)
 YEARS_LONG   = (2000, 2023)
+YEARS_EXTENDED = (1970, 2023)  # for Malaysia historical transition chart
 
 # -- Mongolia ------------------------------------------------------------------
 print("\n=== WITS - Mongolia ===")
@@ -191,8 +192,8 @@ print("  Total exports -> world (2000-2023)")
 save(wits_fetch("PHL", "WLD", "Total",           *YEARS_LONG), "wits_phl_total_world.csv")
 time.sleep(1)
 
-print("  Machinery & Electronics (HS 84-85) -> world (2019-2023)")
-save(wits_fetch("PHL", "WLD", "84-85_MachElec",  *YEARS_RECENT), "wits_phl_machElec.csv")
+print("  Machinery & Electronics (HS 84-85) -> world (2000-2023)")
+save(wits_fetch("PHL", "WLD", "84-85_MachElec",  *YEARS_LONG), "wits_phl_machElec.csv")
 time.sleep(1)
 
 print("  Manufactures -> world (2000-2023)")
@@ -224,6 +225,18 @@ time.sleep(1)
 
 print("  Food (palm oil derivatives) -> world (2000-2023)")
 save(wits_fetch("MYS", "WLD", "Food",             *YEARS_LONG), "wits_mys_food.csv")
+time.sleep(1)
+
+print("  Total imports <- world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "Total",           *YEARS_LONG, indicator="MPRT-TRD-VL"), "wits_mys_import_total.csv")
+time.sleep(1)
+
+print("  E&E imports (HS 84-85) <- world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "84-85_MachElec",  *YEARS_LONG, indicator="MPRT-TRD-VL"), "wits_mys_import_machElec.csv")
+time.sleep(1)
+
+print("  Fuels imports (HS 27) <- world (2000-2023)")
+save(wits_fetch("MYS", "WLD", "27-27_Fuels",     *YEARS_LONG, indicator="MPRT-TRD-VL"), "wits_mys_import_fuels.csv")
 time.sleep(1)
 
 
@@ -278,6 +291,24 @@ if frames:
     phl_wide.columns.name = None
     save(phl_wide, "derived_phl_remittances.csv")
 
+# Philippines: E&E share of exports (MachElec / total)
+phl_total    = load("wits_phl_total_world.csv")
+phl_machElec = load("wits_phl_machElec.csv")
+phl_manuf    = load("wits_phl_manuf.csv")
+if not phl_total.empty and not phl_machElec.empty:
+    phl_comp = phl_total[["year", "value_kusd"]].rename(columns={"value_kusd": "total_kusd"})
+    for label, df_src in [("machElec_kusd", phl_machElec),
+                           ("manuf_kusd",    phl_manuf)]:
+        if not df_src.empty:
+            phl_comp = phl_comp.merge(
+                df_src[["year", "value_kusd"]].rename(columns={"value_kusd": label}),
+                on="year", how="left"
+            )
+    for col in [c for c in phl_comp.columns if c.endswith("_kusd") and c != "total_kusd"]:
+        pct_col = col.replace("_kusd", "_pct")
+        phl_comp[pct_col] = (phl_comp[col] / phl_comp["total_kusd"] * 100).round(1)
+    save(phl_comp, "derived_phl_export_composition.csv")
+
 # Malaysia: E&E share of exports (MachElec / total)
 mys_total    = load("wits_mys_total_world.csv")
 mys_machElec = load("wits_mys_machElec.csv")
@@ -297,6 +328,128 @@ if not mys_total.empty and not mys_machElec.empty:
         pct_col = col.replace("_kusd", "_pct")
         mys_comp[pct_col] = (mys_comp[col] / mys_comp["total_kusd"] * 100).round(1)
     save(mys_comp, "derived_mys_export_composition.csv")
+
+# Malaysia: E&E intra-industry trade (imports + exports, HS 84-85)
+mys_imp_total    = load("wits_mys_import_total.csv")
+mys_imp_machElec = load("wits_mys_import_machElec.csv")
+mys_imp_fuels    = load("wits_mys_import_fuels.csv")
+if not mys_imp_total.empty and not mys_imp_machElec.empty:
+    mys_trade = mys_total[["year", "value_kusd"]].rename(columns={"value_kusd": "export_total_kusd"})
+    mys_trade = mys_trade.merge(
+        mys_machElec[["year", "value_kusd"]].rename(columns={"value_kusd": "export_ee_kusd"}),
+        on="year", how="left"
+    )
+    mys_trade = mys_trade.merge(
+        mys_imp_total[["year", "value_kusd"]].rename(columns={"value_kusd": "import_total_kusd"}),
+        on="year", how="left"
+    )
+    mys_trade = mys_trade.merge(
+        mys_imp_machElec[["year", "value_kusd"]].rename(columns={"value_kusd": "import_ee_kusd"}),
+        on="year", how="left"
+    )
+    if not mys_imp_fuels.empty:
+        mys_trade = mys_trade.merge(
+            mys_imp_fuels[["year", "value_kusd"]].rename(columns={"value_kusd": "import_fuels_kusd"}),
+            on="year", how="left"
+        )
+    mys_trade["export_ee_pct"] = (mys_trade["export_ee_kusd"] / mys_trade["export_total_kusd"] * 100).round(1)
+    mys_trade["import_ee_pct"] = (mys_trade["import_ee_kusd"] / mys_trade["import_total_kusd"] * 100).round(1)
+    save(mys_trade, "derived_mys_ee_trade.csv")
+
+# Malaysia: extended WB WDI composition (1970-2024) for historical transition chart
+print("\n=== Extended WB data for Malaysia (1970-2024) ===")
+MYS_WB_INDICATORS = {
+    "TX.VAL.MANF.ZS.UN":   "manufactures_pct",
+    "TX.VAL.FUEL.ZS.UN":   "fuel_pct",
+    "TX.VAL.AGRI.ZS.UN":   "agri_raw_pct",
+    "TX.VAL.MMTL.ZS.UN":   "ores_metals_pct",
+}
+mys_wb_frames = []
+for code, name in MYS_WB_INDICATORS.items():
+    print(f"  {code}  ({name})")
+    df = wb_fetch(["MYS"], code, start=1970, end=2024)
+    if not df.empty:
+        df = df.rename(columns={"value": name})[["year", name]]
+        mys_wb_frames.append(df)
+    time.sleep(0.6)
+if mys_wb_frames:
+    from functools import reduce
+    mys_wb_comp = reduce(lambda a, b: a.merge(b, on="year", how="outer"), mys_wb_frames)
+    mys_wb_comp = mys_wb_comp.sort_values("year").reset_index(drop=True)
+    save(mys_wb_comp, "derived_mys_export_composition_extended.csv")
+
+# Malaysia: FDI inflows + manufactures % (1970-2024) for FDI-E&E narrative
+print("\n=== Malaysia FDI data (1970-2024) ===")
+MYS_FDI_INDICATORS = {
+    "BX.KLT.DINV.CD.WD":    "fdi_inflows_usd",
+    "BX.KLT.DINV.WD.GD.ZS": "fdi_pct_gdp",
+    "TX.VAL.MANF.ZS.UN":    "manufactures_pct",
+}
+mys_fdi_frames = []
+for code, name in MYS_FDI_INDICATORS.items():
+    print(f"  {code}  ({name})")
+    df = wb_fetch(["MYS"], code, start=1970, end=2024)
+    if not df.empty:
+        df = df.rename(columns={"value": name})[["year", name]]
+        mys_fdi_frames.append(df)
+    time.sleep(0.6)
+if mys_fdi_frames:
+    from functools import reduce
+    mys_fdi = reduce(lambda a, b: a.merge(b, on="year", how="outer"), mys_fdi_frames)
+    mys_fdi = mys_fdi.sort_values("year").reset_index(drop=True)
+    save(mys_fdi, "derived_mys_fdi.csv")
+
+
+# Mongolia: commodity vulnerability (GDP growth + export revenue swings)
+print("\n=== Mongolia commodity vulnerability data (2000-2024) ===")
+MNG_VULN_INDICATORS = {
+    "NY.GDP.MKTP.KD.ZG":   "gdp_growth_pct",
+    "NY.GDP.MKTP.CD":      "gdp_usd",
+    "TX.VAL.MRCH.CD.WT":   "merchandise_exports_usd",
+}
+mng_vuln_frames = []
+for code, name in MNG_VULN_INDICATORS.items():
+    print(f"  {code}  ({name})")
+    df = wb_fetch(["MNG"], code, start=2000, end=2024)
+    if not df.empty:
+        df = df.rename(columns={"value": name})[["year", name]]
+        mng_vuln_frames.append(df)
+    time.sleep(0.6)
+if mng_vuln_frames:
+    from functools import reduce
+    mng_vuln = reduce(lambda a, b: a.merge(b, on="year", how="outer"), mng_vuln_frames)
+    mng_vuln = mng_vuln.sort_values("year").reset_index(drop=True)
+    mng_vuln["export_yoy_pct"] = mng_vuln["merchandise_exports_usd"].pct_change() * 100
+    save(mng_vuln, "derived_mng_commodity_vulnerability.csv")
+
+# Commodity prices: coal & copper (Mongolia's key exports)
+# Source: IMF Primary Commodity Prices via FRED (Federal Reserve Economic Data)
+import io
+print("\n=== Commodity prices (FRED / IMF, 2000-2024) ===")
+FRED_SERIES = {
+    "PCOALAUUSDM": "coal_price_usd_ton",
+    "PCOPPUSDM":   "copper_price_usd_ton",
+}
+price_frames = []
+for sid, name in FRED_SERIES.items():
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd=2000-01-01&coed=2024-12-01&fq=Annual&fam=avg"
+    print(f"  {sid}  ({name})")
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+        df["year"] = pd.to_datetime(df["observation_date"]).dt.year
+        df = df.rename(columns={sid: name})
+        df[name] = pd.to_numeric(df[name], errors="coerce")
+        price_frames.append(df[["year", name]].dropna())
+    except Exception as e:
+        print(f"    [WARN] {sid}: {e}")
+    time.sleep(0.6)
+if price_frames:
+    from functools import reduce
+    prices = reduce(lambda a, b: a.merge(b, on="year", how="outer"), price_frames)
+    prices = prices.sort_values("year").reset_index(drop=True)
+    save(prices, "derived_commodity_prices.csv")
 
 
 # =============================================================================
