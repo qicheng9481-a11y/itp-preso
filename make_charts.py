@@ -117,7 +117,7 @@ def chart_mng_export_composition():
     agri  = mng["agri_raw_pct_exports"].fillna(0).values
     other = np.clip(100 - fuel - ores - manuf - agri, 0, 100)
 
-    fig, ax = plt.subplots(figsize=(11, 5))
+    fig, ax = plt.subplots(figsize=(11, 7.5))
     w = 0.7
 
     b1 = ax.bar(years, fuel,  w, label="Coal & Fuels (HS 27)",         color=C["coal"])
@@ -139,7 +139,7 @@ def chart_mng_export_composition():
     pct_fmt(ax)
     ax.set_xticks(years)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.06), framealpha=0, fontsize=10, ncol=5)
-    src(ax, "World Bank WDI (TX.VAL.FUEL.ZS.UN, TX.VAL.MMTL.ZS.UN, TX.VAL.MANF.ZS.UN)", y=-0.24)
+    src(ax, "World Bank WDI (TX.VAL.FUEL.ZS.UN, TX.VAL.MMTL.ZS.UN, TX.VAL.MANF.ZS.UN, TX.VAL.AGRI.ZS.UN)", y=-0.24)
     fig.tight_layout()
     save(fig, "chart_mng_export_composition.png")
 
@@ -151,7 +151,7 @@ def chart_mng_export_composition():
 def chart_mng_china_dependency():
     dep = mng_dep[mng_dep["year"] >= 2013].copy()
 
-    fig, ax1 = plt.subplots(figsize=(10, 5))
+    fig, ax1 = plt.subplots(figsize=(7, 11))
     ax2 = ax1.twinx()
 
     years = dep["year"].values
@@ -192,10 +192,10 @@ def chart_mng_china_dependency():
     # Combined legend
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="upper center", bbox_to_anchor=(0.5, -0.08),
+    ax1.legend(h1 + h2, l1 + l2, loc="upper center", bbox_to_anchor=(0.5, -0.06),
                framealpha=0, fontsize=10, ncol=3)
     ax1.grid(axis="y", alpha=0.25)
-    src(ax1, "WITS TradeStats (via World Bank SDMX)", y=-0.24)
+    src(ax1, "WITS TradeStats, Total exports, MNG→WLD & MNG→CHN (via World Bank SDMX)", y=-0.13)
     fig.tight_layout()
     save(fig, "chart_mng_china_dependency.png")
 
@@ -214,9 +214,9 @@ def chart_mng_commodity_vulnerability():
     copper  = df["copper_price_usd_ton"].values / 1000     # thousands USD/ton
     gdp_g   = df["gdp_growth_pct"].values
 
-    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(11, 7),
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(6, 9),
                                           gridspec_kw={"height_ratios": [1, 1],
-                                                       "hspace": 0.35})
+                                                       "hspace": 0.4})
 
     # ── Top panel: commodity prices ──
     ax_coal = ax_top
@@ -279,7 +279,8 @@ def chart_mng_commodity_vulnerability():
 
     fig.suptitle("Mongolia: Vulnerability to Commodity Price Shocks",
                  fontsize=14, fontweight="bold", y=1.0)
-    src(ax_bot, "IMF Primary Commodity Prices (via FRED); World Bank WDI", y=-0.20)
+    src(ax_bot, "FRED: PCOALAUUSDM, PCOPPUSDM (IMF Primary Commodity Prices)", y=-0.20)
+    src(ax_bot, "World Bank WDI (NY.GDP.MKTP.KD.ZG, TX.VAL.MRCH.CD.WT)", y=-0.28)
     fig.tight_layout()
     save(fig, "chart_mng_commodity_vulnerability.png")
 
@@ -354,9 +355,9 @@ def chart_phl_export_composition():
     w_other_mfg = np.clip(w_manuf - w_ee, 0, 100)
     w_rest      = np.clip(100 - w_manuf, 0, 100)
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6.5),
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7.5),
                                     gridspec_kw={"height_ratios": [1, 1],
-                                                 "hspace": 0.38})
+                                                 "hspace": 0.62})
 
     # ── Top panel: stacked bar ──
     w = 0.7
@@ -378,8 +379,9 @@ def chart_phl_export_composition():
     pct_fmt(ax1)
     ax1.set_xticks(wb_years[::2])
     ax1.tick_params(labelsize=8)
-    ax1.legend(loc="center left", bbox_to_anchor=(1.01, 0.5),
-               framealpha=0.75, fontsize=8)
+    ax1.legend(loc="lower left", bbox_to_anchor=(0, 1.06),
+               framealpha=0.75, fontsize=8, ncol=1)
+    src(ax1, "World Bank WDI (TX.VAL.MANF.ZS.UN, TX.VAL.FUEL.ZS.UN, TX.VAL.MMTL.ZS.UN, TX.VAL.AGRI.ZS.UN)", y=-0.22)
 
     # ── Bottom panel: WITS E&E breakdown (stacked bar) ──
     C_other_mfg = "#5DADE2"
@@ -401,9 +403,9 @@ def chart_phl_export_composition():
     pct_fmt(ax2)
     ax2.set_xticks(w_years[::2])
     ax2.tick_params(labelsize=8)
-    ax2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5),
-               framealpha=0.75, fontsize=8)
-    src(ax2, "World Bank WDI; WITS TradeStats (HS 84-85)", y=-0.20)
+    ax2.legend(loc="lower left", bbox_to_anchor=(0, 1.06),
+               framealpha=0.75, fontsize=8, ncol=1)
+    src(ax2, "WITS TradeStats (84-85_MachElec, manuf; PHL→WLD)", y=-0.20)
 
     fig.suptitle("Philippines: Merchandise Export Composition",
                  fontsize=13, fontweight="bold", y=1.0)
@@ -484,6 +486,7 @@ def chart_mys_ee_transition():
     ax1.set_xlim(wb_years[0] - 0.5, wb_years[-1] + 0.5)
     ax1.legend(loc="center left", bbox_to_anchor=(1.01, 0.5),
                framealpha=0.75, fontsize=8)
+    src(ax1, "World Bank WDI (TX.VAL.MANF.ZS.UN, TX.VAL.FUEL.ZS.UN, TX.VAL.AGRI.ZS.UN, TX.VAL.MMTL.ZS.UN)", y=-0.22)
 
     # ── Bottom panel: WITS E&E breakdown (2000–2023) ──
     C_other_mfg = "#5DADE2"
@@ -524,7 +527,7 @@ def chart_mys_ee_transition():
     ax2.set_xlim(w_years[0] - 0.5, w_years[-1] + 0.5)
     ax2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5),
                framealpha=0.75, fontsize=8)
-    src(ax2, "World Bank WDI; WITS TradeStats (HS 84-85, HS 27, AgrRaw)", y=-0.20)
+    src(ax2, "WITS TradeStats (84-85_MachElec, 27-27_Fuels, AgrRaw; MYS→WLD)", y=-0.20)
 
     fig.suptitle("Malaysia: From Resource Exports to E&E Dominance",
                  fontsize=13, fontweight="bold", y=1.0)
@@ -544,9 +547,9 @@ def chart_mys_fdi():
     fdi_pct  = df["fdi_pct_gdp"].values
     manuf    = df["manufactures_pct"].values
 
-    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(5.5, 8),
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(9, 9),
                                           gridspec_kw={"height_ratios": [1, 1],
-                                                       "hspace": 0.35})
+                                                       "hspace": 0.45})
 
     # ── Top panel: FDI inflows bar chart ──
     bar_colors = ["#1A5276" if 1986 <= y <= 2000 else "#85C1E9" for y in years]
@@ -595,7 +598,7 @@ def chart_mys_fdi():
 
     fig.suptitle("Malaysia: FDI & Manufacturing\nExport Transformation (1970–2024)",
                  fontsize=12, fontweight="bold", y=0.99)
-    src(ax_bot, "World Bank WDI", y=-0.22)
+    src(ax_bot, "World Bank WDI (BX.KLT.DINV.CD.WD, TX.VAL.MANF.ZS.UN)", y=-0.22)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     save(fig, "chart_mys_fdi.png")
 
@@ -674,7 +677,7 @@ def chart_mys_ee_intra_industry():
     fig.suptitle(
         "Malaysia: E&E Dominates Both Exports and Imports — Intra-Industry Trade (2000–2023)",
         fontsize=13, fontweight="bold", y=1.0)
-    src(ax1, "WITS TradeStats (HS 84-85)")
+    src(ax1, "WITS TradeStats (84-85_MachElec; MYS exports & imports)")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     save(fig, "chart_mys_ee_intra_industry.png")
 
@@ -717,7 +720,7 @@ def chart_synthesis():
                 xytext=(-30, -15), textcoords="offset points",
                 fontsize=10, fontweight="bold", color=C["coal"],
                 arrowprops=dict(arrowstyle="-", color=C["coal"]))
-    src(ax, "World Bank WDI", y=-0.18)
+    src(ax, "World Bank WDI (TX.VAL.FUEL.ZS.UN, TX.VAL.MMTL.ZS.UN)", y=-0.18)
 
     # -- Panel 2: Philippines remittances % GDP --
     ax = axes[1]
@@ -737,7 +740,7 @@ def chart_synthesis():
                 xytext=(-40, 5), textcoords="offset points",
                 fontsize=10, fontweight="bold", color=C["remiit"],
                 arrowprops=dict(arrowstyle="-", color=C["remiit"]))
-    src(ax, "World Bank WDI", y=-0.18)
+    src(ax, "World Bank WDI (BX.TRF.PWKR.DT.GD.ZS)", y=-0.18)
 
     # -- Panel 3: Malaysia E&E share --
     ax = axes[2]
@@ -756,7 +759,7 @@ def chart_synthesis():
                 xytext=(-40, 5), textcoords="offset points",
                 fontsize=10, fontweight="bold", color=C["ee"],
                 arrowprops=dict(arrowstyle="-", color=C["ee"]))
-    src(ax, "WITS TradeStats", y=-0.18)
+    src(ax, "WITS TradeStats (84-85_MachElec; MYS→WLD)", y=-0.18)
 
     fig.tight_layout()
     save(fig, "chart_synthesis.png")
